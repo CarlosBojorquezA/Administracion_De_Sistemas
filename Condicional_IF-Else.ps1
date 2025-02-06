@@ -10,4 +10,3 @@ else
         Write-Host "num1 es menor que 50"
     }
 
-# Imprimir el valor de num1

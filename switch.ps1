@@ -1,4 +1,4 @@
-switch (2)
+switch (4)
 {
     1 {"[$_] es uno"}
     2 {"[$_] es dos"}
