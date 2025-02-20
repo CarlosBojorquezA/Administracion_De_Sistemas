@@ -1,3 +1,4 @@
+# ejecucion de scripts
 Get-ExecutionPolicy
 
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
