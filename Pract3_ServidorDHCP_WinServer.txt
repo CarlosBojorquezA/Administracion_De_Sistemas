@@ -1,0 +1,21 @@
+$ScopeID = Read-Host "Ingrese el ID del ámbito (ejemplo: 192.168.1.0)"
+$SubnetMask = Read-Host "Ingrese la máscara de subred (ejemplo: 255.255.255.0)"
+$StartRange = Read-Host "Ingrese el rango de IPs inicial (ejemplo: 192.168.1.100)"
+$EndRange = Read-Host "Ingrese el rango de IPs final (ejemplo: 192.168.1.200)"
+$Gateway = Read-Host "Ingrese la puerta de enlace (ejemplo: 192.168.1.1)"
+
+# Instalar el rol DHCP
+Install-WindowsFeature -Name DHCP -IncludeManagementTools
+
+# Configurar el ámbito DHCP
+Add-DhcpServerv4Scope -Name "Red Local" -StartRange $StartRange -EndRange $EndRange -SubnetMask $SubnetMask -State Active
+
+# Configurar opciones DHCP
+Set-DhcpServerv4OptionValue -ScopeId $ScopeID -Router $Gateway  
+
+# Iniciar y habilitar el servicio DHCP
+Start-Service -Name DHCPServer
+Set-Service -Name DHCPServer -StartupType Automatic
+
+# Verificar estado
+Get-DhcpServerv4Scope

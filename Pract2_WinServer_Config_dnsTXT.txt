@@ -1,0 +1,22 @@
+$DOMINIO = Read-Host "Ingrese el dominio: "
+$IP_SERVIDOR = Read-Host "Ingrese el ip del servidor: "
+$IP_CLIENTE = Read-Host "Ingrese el ip del cliente"
+
+#instalacion del DNS
+Write-Host "Instalando DNS"
+Install-WindowsFeature -Name DNS -StartupType Automatic
+Start-Service DNS
+
+#creando zona directa
+Write-Host "creando zona directa"
+Add-DnsServerPrimaryZone -Name $DOMINIO -ZoneFile "$DOMINIO.dns"
+
+#agrega registro A para el dominio
+Write-Host "Agregando registros A al dominio"
+Add-DnsServerReourceRecordA -ZoneName $DOMINIO -Name "@" -IPv4Address $IP_SERVIDOR -TimeToLive 01:00:00
+Add-DnsServerReourceRecordA -ZoneName $DOMINIO -Name "www" -IPv4Address $IP_SERVIDOR -TimeToLive 01:00:00
+
+#reiniciar servicio
+Restart-Service DNS
+
+Write-Host "Configuracino completa"

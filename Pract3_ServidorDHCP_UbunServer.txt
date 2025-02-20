@@ -1,0 +1,34 @@
+# Detectar la interfaz de red automáticamente
+INTERFAZ=$(ip -o -4 route show to default | awk '{print $5}')
+
+# Solicitar información al usuario
+read -p "Ingrese la dirección de red (ejemplo: 192.168.1.0): " RED
+read -p "Ingrese la máscara de subred (ejemplo: 255.255.255.0): " MASCARA
+read -p "Ingrese el rango de IPs inicial (ejemplo: 192.168.1.100): " RANGO_INICIO
+read -p "Ingrese el rango de IPs final (ejemplo: 192.168.1.200): " RANGO_FIN
+read -p "Ingrese la puerta de enlace (ejemplo: 192.168.1.1): " GATEWAY
+
+# Instalar el servicio DHCP
+sudo apt update && sudo apt install -y isc-dhcp-server
+
+# Configurar la interfaz del DHCP
+echo "INTERFACESv4=\"$INTERFAZ\"" | sudo tee /etc/default/isc-dhcp-server > /dev/null
+
+# Configurar el archivo dhcpd.conf
+sudo bash -c "cat <<EOF > /etc/dhcp/dhcpd.conf
+default-lease-time 600;
+max-lease-time 7200;
+authoritative;
+subnet $RED netmask $MASCARA {
+  range $RANGO_INICIO $RANGO_FIN;
+  option routers $GATEWAY;
+}
+EOF"
+
+# Reiniciar el servicio DHCP
+sudo systemctl restart isc-dhcp-server
+sudo systemctl enable isc-dhcp-server
+
+# Verificar estado
+echo "Servidor DHCP configurado. Verifique la conexión desde un cliente DHCP."
+sudo systemctl status isc-dhcp-server

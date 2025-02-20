@@ -1,0 +1,44 @@
+read -p "Ingrese el nombre del dominio:" DOMINIO
+read -p "ingresa la IP del servidor DNS:" IP_SERVIDOR
+read -p "ingrese la IP del cliente:" IP_CLIENTE
+
+# intalacion de bind9
+apt update && apt install -y bind9 bind9utils
+
+ZONA_DIRECTA="/etc/bind/db.$DOMINIO"
+sudo cp /etc/bind/db.local "$ZONA_DIRECTA"
+
+#configuracion de la zona directa
+echo "configurando archivo named.conf.local"
+cat > /etc/bind/named.conf.local <<EOL
+zone "$DOMINIO" {
+	type master;
+	file "/etc/bind/db.$DOMINIO"
+};
+EOF
+# crear archivo de zona
+echo "creando archivo de zona $DOMINIO"
+cat <<EOL > $ZONA_DIRECTA
+\$TTL	604800
+@	IN	SOA	ns1.$DOMINIO. root.$DOMINIO. (
+			2		; Serial
+			604800		; Refresh
+			86400		; Retry
+			2419200		; Explice
+			604800 )	; MINIMUM TTL
+;
+@	IN	NS	ns.$DOMINIO.
+@	IN	A	$IP_CLIENTE
+ns	IN	A	$IP_SERVIDOR
+www	IN	A	$IP_CLIENTE
+EOL
+
+echo "reiniciando bind"
+sudo systemctl restart named
+sudo systemctl enable named
+
+echo "confirmando estado"
+systemctl status bind9 --no-pager
+
+echo "configuracion completa"
+
