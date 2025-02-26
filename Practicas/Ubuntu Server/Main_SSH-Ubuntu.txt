@@ -1,0 +1,34 @@
+# Cargar los scripts de DNS y DHCP
+source instalar_ssh.sh
+source configurar_dns.sh
+source configurar_dhcp.sh
+
+# Función para instalar y configurar SSH
+install_ssh() {
+    echo "Verificando si SSH está instalado."
+    if systemctl is-active --quiet ssh; then
+        echo "SSH ya está instalado y en ejecución."
+    else
+        echo "SSH no está instalado. Procediendo con la instalación."
+        sudo apt update && sudo apt install -y openssh-server
+        sudo systemctl enable ssh
+        sudo systemctl start ssh
+        echo "SSH instalado y configurado correctamente."
+    fi
+}
+
+# Verificar e instalar SSH si es necesario
+install_ssh
+
+# Menú para seleccionar el servicio a configurar
+echo -e "\nSeleccione el servicio a configurar:"
+echo "1. Instalar y configurar Servidor DNS"
+echo "2. Instalar y configurar Servidor DHCP"
+
+read -p "Ingrese su opción: " opcion
+
+case $opcion in
+    1) configurar_dns ;;
+    2) configurar_dhcp ;;
+    *) echo "Opción no válida, intente de nuevo." ;;
+esac

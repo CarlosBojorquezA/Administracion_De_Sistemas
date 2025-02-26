@@ -1,0 +1,21 @@
+function Install-DNS {
+    Write-Host "Instalando servidor DNS."
+    Install-WindowsFeature -Name DNS -IncludeManagementTools -StartupType Automatic
+    Start-Service DNS
+    Write-Host "Servidor DNS instalado correctamente."
+}
+
+function Configurar-DNS {
+    $DOMINIO = Read-Host "Ingrese el dominio"
+    $IP_SERVIDOR = Read-Host "Ingrese la IP del servidor"
+
+    Write-Host "Creando zona directa."
+    Add-DnsServerPrimaryZone -Name $DOMINIO -ZoneFile "$DOMINIO.dns"
+
+    Write-Host "Agregando registros A."
+    Add-DnsServerResourceRecordA -ZoneName $DOMINIO -Name "@" -IPv4Address $IP_SERVIDOR -TimeToLive 01:00:00
+    Add-DnsServerResourceRecordA -ZoneName $DOMINIO -Name "www" -IPv4Address $IP_SERVIDOR -TimeToLive 01:00:00
+
+    Restart-Service DNS
+    Write-Host "Configuración de DNS completada."
+}

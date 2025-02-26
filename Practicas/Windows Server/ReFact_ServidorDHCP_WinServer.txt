@@ -1,0 +1,24 @@
+function Install-DHCP {
+    Write-Host "Instalando servidor DHCP."
+    Install-WindowsFeature -Name DHCP -IncludeManagementTools
+    Write-Host "Servidor DHCP instalado correctamente."
+}
+
+function Configurar-DHCP {
+    $ScopeID = Read-Host "Ingrese el ID del ámbito (ejemplo: 192.168.1.0)"
+    $SubnetMask = Read-Host "Ingrese la máscara de subred (ejemplo: 255.255.255.0)"
+    $StartRange = Read-Host "Ingrese el rango de IPs inicial (ejemplo: 192.168.1.100)"
+    $EndRange = Read-Host "Ingrese el rango de IPs final (ejemplo: 192.168.1.200)"
+    $Gateway = Read-Host "Ingrese la puerta de enlace:"
+
+    Write-Host "Configurando ámbito DHCP."
+    Add-DhcpServerv4Scope -Name "Red Local" -StartRange $StartRange -EndRange $EndRange -SubnetMask $SubnetMask -State Active
+
+    Write-Host "Configurando opciones DHCP."
+    Set-DhcpServerv4OptionValue -ScopeId $ScopeID -Router $Gateway  
+
+    Start-Service -Name DHCPServer
+    Set-Service -Name DHCPServer -StartupType Automatic
+
+    Write-Host "Configuración de DHCP completada."
+}

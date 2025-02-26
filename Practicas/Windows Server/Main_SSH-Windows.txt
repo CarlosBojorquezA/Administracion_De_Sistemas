@@ -1,0 +1,36 @@
+. .\ReFact_ServidorDNS.ps1
+. .\ReFact_ServidorDHCP.ps1
+
+function Install-SSH {
+    Write-Host "Verificando si SSH está instalado"
+    $sshService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+
+    if ($sshService) {
+        Write-Host "SSH ya está instalado y corriendo."
+    } else {
+        Write-Host "SSH no está instalado. Instalando ahora"
+        Add-WindowsFeature -Name OpenSSH-Server
+        Start-Service sshd
+        Set-Service -Name sshd -StartupType Automatic
+
+        Write-Host "Configurando firewall para permitir SSH"
+        New-NetFirewallRule -DisplayName "SSH" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 22
+
+        Write-Host "SSH instalado y configurado correctamente"
+    }
+}
+
+# Verificar e instalar SSH si es necesario
+Install-SSH
+
+Write-Host "`nSeleccione el servicio a configurar: "
+Write-Host "1. Instalar y configurar Servidor DNS"
+Write-Host "2. Instalar y configurar Servidor DHCP"
+
+$opcion = Read-Host "Ingrese su opción: "
+
+switch ($opcion) {
+    "1" { Install-DNS; Configurar-DNS }
+    "2" { Install-DHCP; Configurar-DHCP }
+    default { Write-Host "Opción no válida, intente de nuevo" }
+}
