@@ -1,4 +1,4 @@
-Import-Module "./FuncionesFTP.ps1"
+. "$PSScriptRoot\FuncionesFTP.ps1"
 
 # Función para verificar e instalar el servidor FTP si no está instalado
 function Verificar-Instalar-FTP {
@@ -23,24 +23,30 @@ function Verificar-Instalar-FTP {
 
 Verificar-Instalar-FTP
 
+# Función para mostrar el menú
 function Mostrar-Menu {
-    Write-Host "\n--- Administrador FTP ---" -ForegroundColor Cyan
+    Write-Host "`n--- Administrador FTP ---" -ForegroundColor Cyan
     Write-Host "1. Agregar usuario"
     Write-Host "2. Eliminar usuario"
-    Write-Host "3. Configurar permisos de usuario"
-    Write-Host "4. Salir"
-    
+    Write-Host "3. Cambiar usuario de grupo"
+
     $opcion = Read-Host "Seleccione una opción"
     return $opcion
 }
 
+# Bucle principal del menú
 while ($true) {
     $opcion = Mostrar-Menu
     switch ($opcion) {
         "1" {
             $nombreUsuario = Read-Host "Ingrese el nombre del usuario"
             $grupo = Read-Host "Ingrese el grupo (reprobados/recursadores)"
-            Crear-Usuario -NombreUsuario $nombreUsuario -Grupo $grupo
+
+            if ($GruposPermitidos -contains $grupo) {
+                Crear-Usuario -NombreUsuario $nombreUsuario -Grupo $grupo
+            } else {
+                Write-Host "Error: Grupo no permitido." -ForegroundColor Red
+            }
         }
         "2" {
             $nombreUsuario = Read-Host "Ingrese el nombre del usuario a eliminar"
@@ -48,12 +54,13 @@ while ($true) {
         }
         "3" {
             $nombreUsuario = Read-Host "Ingrese el nombre del usuario"
-            $grupo = Read-Host "Ingrese el grupo (reprobados/recursadores)"
-            Configurar-Permisos -NombreUsuario $nombreUsuario -Grupo $grupo
-        }
-        "4" {
-            Write-Host "Saliendo..." -ForegroundColor Magenta
-            break
+            $nuevoGrupo = Read-Host "Ingrese el nuevo grupo (reprobados/recursadores)"
+
+            if ($GruposPermitidos -contains $nuevoGrupo) {
+                Cambiar-Grupo -NombreUsuario $nombreUsuario -NuevoGrupo $nuevoGrupo
+            } else {
+                Write-Host "Error: Grupo no permitido." -ForegroundColor Red
+            }
         }
         default {
             Write-Host "Opción inválida, intente de nuevo." -ForegroundColor Red
