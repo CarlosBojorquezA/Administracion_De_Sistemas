@@ -1,0 +1,60 @@
+echo "Seleccione el servidor a instalar"
+echo "1.- Apache"
+echo "2.- Tomcat"
+echo "3.- Nginx"
+while true; do
+    read -rp "Ingrese una opcion: " opcion
+    case "$opcion" in
+        1) service="apache"; break ;;
+        2) service="tomcat"; break ;;
+        3) service="nginx"; break ;;
+        *) echo "Opción inválida, intente de nuevo" ;;
+    esac
+done
+
+detectar_version "$service"
+while true; do
+    read -rp "Seleccione la versión a instalar (1 para LTS o 2 para Desarrollo): " version_elegida
+    if [[ "$version_elegida" =~ ^[1-2]$ ]]; then
+        version=$(apt-cache madison "$service" | awk '{print $3}' | sed -n "${version_elegida}p")
+        break
+    else
+        echo "Opción inválida, solo debe ser 1 o 2"
+    fi
+done
+
+validar_puerto
+instalar_servicio "$service" "$version"
+
+# Verificación de instalación
+echo "Verificando la instalación de $service..."
+if dpkg -l | grep -q "$service"; then
+    echo "$service se instaló correctamente."
+else
+    echo "Error: No se pudo instalar $service."
+    exit 1
+fi
+
+echo "Verificando que el servicio esté activo..."
+if systemctl is-active --quiet "$service"; then
+    echo "$service está activo y funcionando."
+else
+    echo "Error: $service no está corriendo. Intentando iniciarlo..."
+    sudo systemctl start "$service"
+    if systemctl is-active --quiet "$service"; then
+        echo "$service se inició correctamente."
+    else
+        echo "Error crítico: No se pudo iniciar $service."
+        exit 1
+    fi
+fi
+
+echo "Verificando que el servicio esté escuchando en el puerto $port..."
+if ss -tulnp | grep -q ":$port"; then
+    echo "$service está escuchando en el puerto $port."
+else
+    echo "Advertencia: No se encontró a $service en el puerto $port."
+    echo "Verifique manualmente la configuración."
+fi
+
+echo "Fin"

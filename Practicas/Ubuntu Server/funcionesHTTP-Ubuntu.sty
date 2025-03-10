@@ -1,0 +1,88 @@
+#!/bin/bash
+
+# Función para obtener versiones disponibles
+detectar_versiones() {
+    local service=$1
+    case "$service" in
+        apache)
+            versions=( $(apt-cache madison apache2 | awk '{print $3}' | head -2) )
+            ;;
+        tomcat)
+            versions=( $(apt-cache madison tomcat9 | awk '{print $3}' | head -2) )
+            ;;
+        nginx)
+            versions=( $(apt-cache madison nginx | awk '{print $3}' | head -2) )
+            ;;
+        *)
+            echo "Error: Servicio no reconocido. Abortando."
+            exit 1
+            ;;
+    esac
+    if [ ${#versions[@]} -eq 0 ]; then
+        echo "Error: No se encontraron versiones disponibles para $service. Verifique su conexión o repositorios."
+        exit 1
+    fi
+    echo "Versiones disponibles para $service:"
+    for i in "${!versions[@]}"; do
+        echo "$((i+1)). ${versions[$i]}"
+    done
+}
+
+# Función para validar el puerto
+validar_puerto() {
+    while true; do
+        read -rp "Ingrese el puerto en el que desea configurar el servicio (1024-65535): " port
+        if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1024 ] && [ "$port" -le 65535 ]; then
+            if ss -tuln | grep -q ":$port "; then
+                echo "Error: El puerto $port ya está en uso. Intente con otro."
+            else
+                break
+            fi
+        else
+            echo "Error: Puerto inválido. Debe ser un número entre 1024 y 65535."
+        fi
+    done
+}
+
+# Función para instalar el servicio
+instalar_servicio() {
+    local service=$1
+    local version=$2
+    if [ -z "$version" ]; then
+        echo "Error: No se seleccionó una versión válida. Abortando instalación."
+        exit 1
+    fi
+    echo "Instalando $service versión $version en el puerto $port..."
+    if ! sudo apt-get install -y "$service=$version"; then
+        echo "Error: Falló la instalación de $service. Revise los logs."
+        exit 1
+    fi
+    echo "Configurando $service en el puerto $port..."
+    case "$service" in
+        apache)
+            if sudo sed -i "s/Listen 80/Listen $port/g" /etc/apache2/ports.conf; then
+                sudo systemctl restart apache2
+            else
+                echo "Error al configurar Apache."
+                exit 1
+            fi
+            ;;
+        tomcat)
+            if sudo sed -i "s/Connector port=\"8080\"/Connector port=\"$port\"/g" /etc/tomcat9/server.xml; then
+                sudo systemctl restart tomcat9
+            else
+                echo "Error al configurar Tomcat."
+                exit 1
+            fi
+            ;;
+        nginx)
+            if sudo sed -i "s/listen 80;/listen $port;/g" /etc/nginx/sites-available/default; then
+                sudo systemctl restart nginx
+            else
+                echo "Error al configurar Nginx."
+                exit 1
+            fi
+            ;;
+    esac
+    echo "$service ha sido instalado y configurado en el puerto $port."
+}
