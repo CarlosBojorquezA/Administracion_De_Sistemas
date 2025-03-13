@@ -1,131 +1,593 @@
 #!/bin/bash
 
-# Función para obtener versiones LTS y de desarrollo de Apache
-obtener_versiones_apache() {
-    echo "Obteniendo versiones de Apache..."
-    local versiones=($(curl -s https://downloads.apache.org/httpd/ | grep -oP '(?<=httpd-)\d+\.\d+\.\d+' | sort -V | uniq))
-    
-    echo "🔹 Versiones LTS:"
-    for v in "${versiones[@]}"; do
-        if [[ "$v" =~ ^2\.4\.[0-9]+$ ]]; then
-            echo "   - $v"
-        fi
-    done
-    
-    echo "🔹 Versiones de Desarrollo:"
-    for v in "${versiones[@]}"; do
-        if [[ ! "$v" =~ ^2\.4\.[0-9]+$ ]]; then
-            echo "   - $v"
-        fi
-    done
+# Verificar si el script se ejecuta como root
+if [ "$EUID" -ne 0 ]; then
+  echo "Este script debe ejecutarse como root."
+  echo "Por favor, ejecute: sudo $0"
+  exit 1
+fi
+
+# Verificar que estamos en Ubuntu
+if ! grep -q "Ubuntu" /etc/os-release; then
+  echo "Este script está diseñado para Ubuntu."
+  exit 1
+fi
+
+# Función para validar entrada numérica
+validar_numero() {
+  local input=$1
+  if ! [[ "$input" =~ ^[0-9]+$ ]]; then
+    echo "Error: Debe ingresar un número."
+    return 1
+  fi
+  return 0
 }
 
-# Función para obtener versiones LTS y de desarrollo de Nginx
-obtener_versiones_nginx() {
-    echo "Obteniendo versiones de Nginx..."
-    local versiones=($(curl -s http://nginx.org/en/download.html | grep -oP 'nginx-\d+\.\d+\.\d+' | cut -d '-' -f2 | sort -V | uniq))
-    
-    echo "🔹 Versiones LTS:"
-    for v in "${versiones[@]}"; do
-        if [[ "$v" =~ \.0$ ]]; then
-            echo "   - $v"
-        fi
-    done
-    
-    echo "🔹 Versiones de Desarrollo:"
-    for v in "${versiones[@]}"; do
-        if [[ ! "$v" =~ \.0$ ]]; then
-            echo "   - $v"
-        fi
-    done
-}
-
-# Función para obtener versiones LTS y de desarrollo de Lighttpd
-obtener_versiones_lighttpd() {
-    echo "Obteniendo versiones de Lighttpd..."
-    local versiones=($(curl -s https://download.lighttpd.net/lighttpd/releases-1.4.x/ | grep -oP '(?<=lighttpd-)\d+\.\d+\.\d+' | sort -V | uniq))
-    
-    echo "🔹 Versiones LTS:"
-    for v in "${versiones[@]}"; do
-        if [[ "$v" =~ \.0$ ]]; then
-            echo "   - $v"
-        fi
-    done
-    
-    echo "🔹 Versiones de Desarrollo:"
-    for v in "${versiones[@]}"; do
-        if [[ ! "$v" =~ \.0$ ]]; then
-            echo "   - $v"
-        fi
-    done
-}
-
-# Función para validar el puerto ingresado por el usuario
+# Función para validar puerto
 validar_puerto() {
-    local puerto
-    while true; do
-        read -p "Ingrese el puerto de configuración (1-65535): " puerto
-        if [[ "$puerto" =~ ^[0-9]+$ ]] && [ "$puerto" -ge 1 ] && [ "$puerto" -le 65535 ]; then
-            echo "$puerto"
-            return
-        else
-            echo " Puerto inválido. Intente nuevamente."
-        fi
-    done
+  local puerto=$1
+  
+  # Validar que es un número
+  if ! validar_numero "$puerto"; then
+    return 1
+  fi
+  
+  # Validar rango de puerto
+  if [ "$puerto" -lt 1 ] || [ "$puerto" -gt 65535 ]; then
+    echo "Error: El puerto debe estar entre 1 y 65535."
+    return 1
+  fi
+  
+  # Verificar si el puerto ya está en uso
+  if command -v netstat &> /dev/null; then
+    if netstat -tuln | grep -q ":$puerto "; then
+      echo "Error: El puerto $puerto ya está en uso."
+      return 1
+    fi
+  elif command -v ss &> /dev/null; then
+    if ss -tuln | grep -q ":$puerto "; then
+      echo "Error: El puerto $puerto ya está en uso."
+      return 1
+    fi
+  else
+    apt-get install -y net-tools > /dev/null
+    if netstat -tuln | grep -q ":$puerto "; then
+      echo "Error: El puerto $puerto ya está en uso."
+      return 1
+    fi
+  fi
+  
+  return 0
+}
+
+# Función para verificar dependencias
+verificar_dependencias() {
+  local dependencias=("wget" "tar" "make" "gcc")
+  local faltantes=()
+  
+  for dep in "${dependencias[@]}"; do
+    if ! command -v "$dep" &> /dev/null; then
+      faltantes+=("$dep")
+    fi
+  done
+  
+  if [ ${#faltantes[@]} -gt 0 ]; then
+    echo "Instalando dependencias necesarias: ${faltantes[*]}"
+    apt-get update
+    apt-get install -y "${faltantes[@]}"
+  fi
+}
+
+# Función para verificar espacio en disco
+verificar_espacio() {
+  local espacio_requerido=$1  # en MB
+  local espacio_disponible=$(df -m /usr/local | awk 'NR==2 {print $4}')
+  
+  if [ "$espacio_disponible" -lt "$espacio_requerido" ]; then
+    echo "Error: No hay suficiente espacio en disco. Se necesitan al menos ${espacio_requerido}MB, pero solo hay ${espacio_disponible}MB disponibles."
+    return 1
+  fi
+  
+  return 0
 }
 
 # Función para instalar Apache
 instalar_apache() {
-    echo "Seleccionando versión de Apache..."
-    obtener_versiones_apache
-    read -p "Ingrese la versión de Apache a instalar: " version
-    puerto=$(validar_puerto)
-    echo "Instalando Apache versión $version en el puerto $puerto..."
-    sudo apt update -y
-    sudo apt install -y apache2
-    sudo sed -i "s/Listen 80/Listen $puerto/" /etc/apache2/ports.conf
-    sudo systemctl restart apache2
-    echo "Apache instalado correctamente en el puerto $puerto."
+  # Verificar dependencias y espacio
+  verificar_dependencias
+  if ! verificar_espacio 500; then
+    return 1
+  fi
+  
+  # Versiones disponibles
+  local versiones=("2.4.58|LTS" "2.4.63|Desarrollo")
+  
+  echo "Versiones disponibles de Apache:"
+  for i in "${!versiones[@]}"; do
+    IFS='|' read -r version tipo <<< "${versiones[$i]}"
+    echo "$((i+1)). Apache $version ($tipo)"
+  done
+  
+  # Seleccionar versión
+  local seleccion
+  while true; do
+    read -p "Seleccione la versión a instalar [1-${#versiones[@]}]: " seleccion
+    
+    if validar_numero "$seleccion" && [ "$seleccion" -ge 1 ] && [ "$seleccion" -le "${#versiones[@]}" ]; then
+      break
+    else
+      echo "Selección no válida."
+    fi
+  done
+  
+  # Obtener versión seleccionada
+  IFS='|' read -r version tipo <<< "${versiones[$((seleccion-1))]}"
+  
+  # Solicitar puerto
+  local puerto
+  while true; do
+    read -p "Ingrese el puerto en el que desea configurar Apache: " puerto
+    if validar_puerto "$puerto"; then
+      break
+    fi
+  done
+  
+  echo "Instalando Apache $version en puerto $puerto..."
+  
+  # Verificar si las dependencias específicas de Apache están instaladas
+  apt-get update
+  apt-get install -y build-essential libpcre3-dev libssl-dev libexpat1-dev libapr1-dev libaprutil1-dev
+  
+  # Descargar Apache
+  if [ ! -f "httpd-$version.tar.bz2" ]; then
+    echo "Descargando Apache $version..."
+    wget "https://dlcdn.apache.org/httpd/httpd-$version.tar.bz2"
+    
+    # Verificar descarga
+    if [ $? -ne 0 ]; then
+      echo "Error al descargar Apache. Intentando mirror alternativo..."
+      wget "https://archive.apache.org/dist/httpd/httpd-$version.tar.bz2"
+      
+      if [ $? -ne 0 ]; then
+        echo "Error: No se pudo descargar Apache."
+        return 1
+      fi
+    fi
+  else
+    echo "Usando archivo existente httpd-$version.tar.bz2"
+  fi
+  
+  # Extraer y compilar
+  echo "Extrayendo archivos..."
+  if [ -d "httpd-$version" ]; then
+    rm -rf "httpd-$version"
+  fi
+  
+  tar -xjf "httpd-$version.tar.bz2"
+  if [ $? -ne 0 ]; then
+    echo "Error: No se pudo extraer el archivo."
+    return 1
+  fi
+  
+  cd "httpd-$version" || {
+    echo "Error: No se pudo entrar en el directorio de Apache."
+    return 1
+  }
+  
+  echo "Configurando Apache..."
+  ./configure --prefix=/usr/local/apache
+  if [ $? -ne 0 ]; then
+    echo "Error: La configuración falló."
+    cd ..
+    return 1
+  fi
+  
+  echo "Compilando Apache (esto puede tomar varios minutos)..."
+  make
+  if [ $? -ne 0 ]; then
+    echo "Error: La compilación falló."
+    cd ..
+    return 1
+  fi
+  
+  echo "Instalando Apache..."
+  make install
+  if [ $? -ne 0 ]; then
+    echo "Error: La instalación falló."
+    cd ..
+    return 1
+  fi
+  
+  # Configurar el puerto
+  if [ -f "/usr/local/apache/conf/httpd.conf" ]; then
+    sed -i "s/Listen 80/Listen $puerto/" /usr/local/apache/conf/httpd.conf
+    
+    # Añadir línea ServerName localhost
+    if ! grep -q "ServerName localhost" /usr/local/apache/conf/httpd.conf; then
+      echo "Añadiendo 'ServerName localhost' al archivo de configuración..."
+      echo "ServerName localhost" >> /usr/local/apache/conf/httpd.conf
+    fi
+  else
+    echo "Error: Archivo de configuración no encontrado."
+    cd ..
+    return 1
+  fi
+  
+  # Iniciar Apache
+  echo "Iniciando Apache..."
+  if [ -f "/usr/local/apache/bin/apachectl" ]; then
+    /usr/local/apache/bin/apachectl start
+    
+    # Verificar si está en ejecución
+    sleep 2
+    if /usr/local/apache/bin/apachectl status | grep -q "is running"; then
+      echo "Apache $version instalado y ejecutándose en el puerto $puerto"
+    else
+      echo "Advertencia: Apache está instalado pero podría no estar en ejecución."
+      echo "Ejecutando reinicio con la nueva configuración..."
+      /usr/local/apache/bin/apachectl restart
+      sleep 2
+      if /usr/local/apache/bin/apachectl status | grep -q "is running"; then
+        echo "Apache $version instalado y ejecutándose en el puerto $puerto"
+      else
+        echo "Advertencia: Apache podría no estar en ejecución."
+        echo "Ejecute '/usr/local/apache/bin/apachectl restart' manualmente."
+      fi
+    fi
+  else
+    echo "Error: Ejecutable de Apache no encontrado."
+    cd ..
+    return 1
+  fi
+  
+  cd ..
+  return 0
+}
+
+# Función para instalar Tomcat
+instalar_tomcat() {
+  # Verificar dependencias y espacio
+  verificar_dependencias
+  if ! verificar_espacio 300; then
+    return 1
+  fi
+  
+  # Verificar Java
+  if ! command -v java &> /dev/null; then
+    echo "Java no está instalado. Instalando OpenJDK..."
+    apt-get update
+    apt-get install -y default-jdk
+    if [ $? -ne 0 ]; then
+      echo "Error: No se pudo instalar Java."
+      return 1
+    fi
+  fi
+
+  # Versiones disponibles
+  local versiones=("10.1.16|LTS" "10.1.18|Desarrollo")
+  
+  echo "Versiones disponibles de Tomcat:"
+  for i in "${!versiones[@]}"; do
+    IFS='|' read -r version tipo <<< "${versiones[$i]}"
+    echo "$((i+1)). Tomcat $version ($tipo)"
+  done
+  
+  # Seleccionar versión
+  local seleccion
+  while true; do
+    read -p "Seleccione la versión a instalar [1-${#versiones[@]}]: " seleccion
+    
+    if validar_numero "$seleccion" && [ "$seleccion" -ge 1 ] && [ "$seleccion" -le "${#versiones[@]}" ]; then
+      break
+    else
+      echo "Selección no válida."
+    fi
+  done
+  
+  # Obtener versión seleccionada
+  IFS='|' read -r version tipo <<< "${versiones[$((seleccion-1))]}"
+  local major_version="${version%%.*}"
+  
+  # Solicitar puerto
+  local puerto
+  while true; do
+    read -p "Ingrese el puerto en el que desea configurar Tomcat: " puerto
+    if validar_puerto "$puerto"; then
+      break
+    fi
+  done
+  
+  echo "Instalando Tomcat $version en puerto $puerto..."
+  
+  # Descargar Tomcat
+  local tomcat_file="apache-tomcat-$version.tar.gz"
+  if [ ! -f "$tomcat_file" ]; then
+    echo "Descargando Tomcat $version..."
+    wget "https://downloads.apache.org/tomcat/tomcat-$major_version/v$version/bin/$tomcat_file"
+    
+    # Verificar descarga
+    if [ $? -ne 0 ]; then
+      echo "Error al descargar desde el servidor principal. Intentando mirror alternativo..."
+      wget "https://archive.apache.org/dist/tomcat/tomcat-$major_version/v$version/bin/$tomcat_file"
+      
+      if [ $? -ne 0 ]; then
+        echo "Error: No se pudo descargar Tomcat."
+        return 1
+      fi
+    fi
+  else
+    echo "Usando archivo existente $tomcat_file"
+  fi
+  
+  # Extraer
+  echo "Extrayendo archivos..."
+  if [ -d "apache-tomcat-$version" ]; then
+    rm -rf "apache-tomcat-$version"
+  fi
+  
+  tar -xzf "$tomcat_file"
+  if [ $? -ne 0 ]; then
+    echo "Error: No se pudo extraer el archivo."
+    return 1
+  fi
+  
+  # Verificar si ya existe una instalación previa
+  if [ -d "/usr/local/tomcat" ]; then
+    echo "Encontrada instalación previa de Tomcat."
+    read -p "¿Desea sobrescribirla? (s/n): " respuesta
+    if [ "${respuesta,,}" != "s" ]; then
+      echo "Instalación abortada."
+      return 1
+    fi
+    
+    # Detener servicio si está en ejecución
+    if [ -f "/usr/local/tomcat/bin/shutdown.sh" ]; then
+      echo "Deteniendo servicio Tomcat existente..."
+      /usr/local/tomcat/bin/shutdown.sh
+      sleep 2
+    fi
+    
+    echo "Eliminando instalación anterior..."
+    rm -rf /usr/local/tomcat
+  fi
+  
+  echo "Instalando Tomcat en /usr/local/tomcat..."
+  mv "apache-tomcat-$version" /usr/local/tomcat
+  if [ $? -ne 0 ]; then
+    echo "Error: No se pudo mover los archivos."
+    return 1
+  fi
+  
+  # Configurar el puerto
+  if [ -f "/usr/local/tomcat/conf/server.xml" ]; then
+    sed -i "s/port=\"8080\"/port=\"$puerto\"/" /usr/local/tomcat/conf/server.xml
+  else
+    echo "Error: Archivo de configuración no encontrado."
+    return 1
+  fi
+  
+  # Establecer permisos
+  chmod +x /usr/local/tomcat/bin/*.sh
+  
+  # Iniciar Tomcat
+  echo "Iniciando Tomcat..."
+  /usr/local/tomcat/bin/startup.sh
+  
+  # Verificar si está en ejecución
+  sleep 5
+  if command -v curl &> /dev/null; then
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$puerto" | grep -q "200\|302\|404"; then
+      echo "Tomcat $version instalado y ejecutándose en el puerto $puerto"
+    else
+      echo "Advertencia: Tomcat está instalado pero podría no estar en ejecución."
+      echo "Verifique los logs en /usr/local/tomcat/logs/catalina.out"
+    fi
+  else
+    echo "Tomcat $version instalado en el puerto $puerto"
+    echo "Para verificar su estado, inténtelo en un navegador o instale curl"
+  fi
+  
+  return 0
 }
 
 # Función para instalar Nginx
 instalar_nginx() {
-    echo "Seleccionando versión de Nginx..."
-    obtener_versiones_nginx
-    read -p "Ingrese la versión de Nginx a instalar: " version
-    puerto=$(validar_puerto)
-    echo "Instalando Nginx versión $version en el puerto $puerto..."
-    sudo apt update -y
-    sudo apt install -y nginx
-    sudo sed -i "s/listen 80;/listen $puerto;/" /etc/nginx/sites-available/default
-    sudo systemctl enable nginx
-    sudo systemctl restart nginx
-    echo "Nginx instalado correctamente en el puerto $puerto."
-}
-
-# Función para instalar Lighttpd
-instalar_lighttpd() {
-    echo "Seleccionando versión de Lighttpd..."
-    obtener_versiones_lighttpd
-    read -p "Ingrese la versión de Lighttpd a instalar: " version
-    puerto=$(validar_puerto)
-    echo "Instalando Lighttpd versión $version en el puerto $puerto..."
-    sudo apt update -y
-    sudo apt install -y lighttpd
-    sudo sed -i "s/server.port\s*=\s*80/server.port = $puerto/" /etc/lighttpd/lighttpd.conf
-    sudo systemctl enable lighttpd
-    sudo systemctl start lighttpd
-    echo "✅ Lighttpd instalado correctamente en el puerto $puerto."
-}
-
-# Función para verificar el estado de los servicios
-verificar_status() {
-    echo "🔍 Estado de los servicios instalados:"
-    for servicio in apache2 nginx lighttpd; do
-        if systemctl is-active --quiet $servicio; then
-            echo "✅ $servicio está activo y corriendo."
+    # Verificar dependencias y espacio
+    verificar_dependencias
+    if ! verificar_espacio 200; then
+        return 1
+    fi
+    
+    # Versiones disponibles
+    local versiones=("1.24.0|LTS" "1.25.3|Desarrollo")
+    
+    echo "Versiones disponibles de Nginx:"
+    for i in "${!versiones[@]}"; do
+        IFS='|' read -r version tipo <<< "${versiones[$i]}"
+        echo "$((i+1)). Nginx $version ($tipo)"
+    done
+    
+    # Seleccionar versión
+    local seleccion
+    while true; do
+        read -p "Seleccione la versión a instalar [1-${#versiones[@]}]: " seleccion
+        
+        if validar_numero "$seleccion" && [ "$seleccion" -ge 1 ] && [ "$seleccion" -le "${#versiones[@]}" ]; then
+            break
         else
-            echo "$servicio no está corriendo."
+            echo "Selección no válida."
         fi
     done
+    
+    # Obtener versión seleccionada
+    IFS='|' read -r version tipo <<< "${versiones[$((seleccion-1))]}"
+    
+    # Solicitar puerto
+    local puerto
+    while true; do
+        read -p "Ingrese el puerto en el que desea configurar Nginx: " puerto
+        if validar_puerto "$puerto"; then
+            break
+        fi
+    done
+    
+    echo "Instalando Nginx..."
+    # Verificar si /etc/apt/keyrings existe
+    if [ ! -d "/etc/apt/keyrings" ]; then
+        mkdir -p /etc/apt/keyrings
+    fi
+    
+    # Agregar clave GPG de Nginx
+    if [ ! -f "/etc/apt/keyrings/nginx_signing.key" ]; then
+        wget https://nginx.org/keys/nginx_signing.key
+        if [ $? -ne 0 ]; then
+            echo "Error: No se pudo descargar la clave de firma de Nginx."
+            return 1
+        fi
+        mv nginx_signing.key /etc/apt/keyrings/
+        chmod 644 /etc/apt/keyrings/nginx_signing.key
+    fi
+    
+    # Determinar la versión de Ubuntu
+    if [ -f /etc/os-release ]; then
+        source /etc/os-release
+        ubuntu_codename=$VERSION_CODENAME
+    else
+        ubuntu_codename="jammy"  # Predeterminado a Ubuntu 22.04
+    fi
+    
+    # Agregar repositorio oficial de Nginx
+    echo "deb [signed-by=/etc/apt/keyrings/nginx_signing.key] http://nginx.org/packages/ubuntu/ $ubuntu_codename nginx" > /etc/apt/sources.list.d/nginx.list
+    echo "deb-src [signed-by=/etc/apt/keyrings/nginx_signing.key] http://nginx.org/packages/ubuntu/ $ubuntu_codename nginx" >> /etc/apt/sources.list.d/nginx.list
+    
+    # Actualizar repositorios
+    apt-get update
+    if [ $? -ne 0 ]; then
+        echo "Error al actualizar repositorios."
+        return 1
+    fi
+    
+    # Determinar el paquete correcto para la versión seleccionada
+    local nginx_pkg="nginx_${version}-1~${ubuntu_codename}_amd64.deb"
+    
+    # Descargar e instalar Nginx manualmente
+    if [ ! -f "$nginx_pkg" ]; then
+        wget "http://nginx.org/packages/ubuntu/pool/nginx/n/nginx/$nginx_pkg"
+        if [ $? -ne 0 ]; then
+            echo "Error: No se pudo descargar el paquete de Nginx."
+            echo "Instalando desde repositorio en su lugar..."
+            apt-get install -y nginx
+            if [ $? -ne 0 ]; then
+                echo "Error: No se pudo instalar Nginx."
+                return 1
+            fi
+        else
+            dpkg -i "$nginx_pkg"
+            if [ $? -ne 0 ]; then
+                echo "Resolviendo dependencias..."
+                apt-get --fix-broken install -y
+                if [ $? -ne 0 ]; then
+                    echo "Error: No se pudieron resolver las dependencias."
+                    return 1
+                fi
+            fi
+        fi
+    else
+        echo "Usando archivo existente $nginx_pkg"
+        dpkg -i "$nginx_pkg"
+        if [ $? -ne 0 ]; then
+            apt-get --fix-broken install -y
+        fi
+    fi
+    
+    # Verificar archivos de configuración
+    local config_file
+    if [ -f "/etc/nginx/conf.d/default.conf" ]; then
+        config_file="/etc/nginx/conf.d/default.conf"
+    elif [ -f "/etc/nginx/nginx.conf" ]; then
+        config_file="/etc/nginx/nginx.conf"
+    else
+        echo "Advertencia: No se encontró el archivo de configuración."
+        return 1
+    fi
+    
+    # Configurar puerto
+    echo "Configurando puerto $puerto..."
+    sed -i "s/listen\s*80;/listen $puerto;/" "$config_file"
+    
+    # Iniciar Nginx
+    echo "Iniciando Nginx..."
+    systemctl start nginx
+    systemctl enable nginx
+    
+    # Verificar si está en ejecución
+    sleep 2
+    if systemctl is-active --quiet nginx; then
+        echo "Nginx instalado y ejecutándose en el puerto $puerto"
+    else
+        echo "Advertencia: Nginx está instalado pero no está en ejecución."
+        echo "Verifique el estado con: systemctl status nginx"
+    fi
+    
+    return 0
+}
+
+# Función para verificar servicios activos
+verificar_servicios() {
+    echo "===== ESTADO DE SERVICIOS HTTP ====="
+    
+    # Verificar Apache
+    echo "Verificando Apache HTTP Server..."
+    if [ -f "/usr/local/apache/bin/apachectl" ]; then
+        if /usr/local/apache/bin/apachectl status | grep -q "is running"; then
+            echo "Apache está ACTIVO"
+            echo "   Puerto: $(grep -E "^Listen" /usr/local/apache/conf/httpd.conf | awk '{print $2}')"
+        else
+            echo "Apache NO está activo"
+            echo "   Para iniciar: sudo /usr/local/apache/bin/apachectl start"
+            echo "   Para configurar: sudo nano /usr/local/apache/conf/httpd.conf"
+        fi
+    else
+        echo "Apache no está instalado"
+    fi
+    
+    # Verificar Tomcat
+    echo -e "\nVerificando Apache Tomcat..."
+    if [ -d "/usr/local/tomcat" ]; then
+        # Buscar procesos Java con Tomcat
+        if pgrep -f "tomcat" > /dev/null; then
+            echo " Tomcat está ACTIVO"
+            if [ -f "/usr/local/tomcat/conf/server.xml" ]; then
+                puerto=$(grep -A 10 "Connector port" /usr/local/tomcat/conf/server.xml | grep -o 'port="[0-9]*"' | head -1 | cut -d'"' -f2)
+                echo "   Puerto: $puerto"
+            fi
+        else
+            echo " Tomcat NO está activo"
+            echo "   Para iniciar: sudo /usr/local/tomcat/bin/startup.sh"
+        fi
+    else
+        echo "Tomcat no está instalado"
+    fi
+    
+    # Verificar Nginx
+    echo -e "\nVerificando Nginx..."
+    if command -v nginx &> /dev/null; then
+        if systemctl is-active --quiet nginx; then
+            echo " Nginx está ACTIVO"
+            if [ -f "/etc/nginx/conf.d/default.conf" ]; then
+                puerto=$(grep -E "listen\s+[0-9]+;" /etc/nginx/conf.d/default.conf | grep -o '[0-9]\+' | head -1)
+                echo "   Puerto: $puerto"
+            elif [ -f "/etc/nginx/nginx.conf" ]; then
+                puerto=$(grep -E "listen\s+[0-9]+;" /etc/nginx/nginx.conf | grep -o '[0-9]\+' | head -1)
+                echo "   Puerto: $puerto"
+            fi
+        else
+            echo " Nginx NO está activo"
+            echo "   Para iniciar: sudo systemctl start nginx"
+        fi
+    else
+        echo " Nginx no está instalado"
+    fi
+    
+    echo "===================================="
 }
