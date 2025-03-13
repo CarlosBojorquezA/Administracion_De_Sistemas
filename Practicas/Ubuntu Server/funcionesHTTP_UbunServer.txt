@@ -1,0 +1,131 @@
+#!/bin/bash
+
+# Función para obtener versiones LTS y de desarrollo de Apache
+obtener_versiones_apache() {
+    echo "Obteniendo versiones de Apache..."
+    local versiones=($(curl -s https://downloads.apache.org/httpd/ | grep -oP '(?<=httpd-)\d+\.\d+\.\d+' | sort -V | uniq))
+    
+    echo "🔹 Versiones LTS:"
+    for v in "${versiones[@]}"; do
+        if [[ "$v" =~ ^2\.4\.[0-9]+$ ]]; then
+            echo "   - $v"
+        fi
+    done
+    
+    echo "🔹 Versiones de Desarrollo:"
+    for v in "${versiones[@]}"; do
+        if [[ ! "$v" =~ ^2\.4\.[0-9]+$ ]]; then
+            echo "   - $v"
+        fi
+    done
+}
+
+# Función para obtener versiones LTS y de desarrollo de Nginx
+obtener_versiones_nginx() {
+    echo "Obteniendo versiones de Nginx..."
+    local versiones=($(curl -s http://nginx.org/en/download.html | grep -oP 'nginx-\d+\.\d+\.\d+' | cut -d '-' -f2 | sort -V | uniq))
+    
+    echo "🔹 Versiones LTS:"
+    for v in "${versiones[@]}"; do
+        if [[ "$v" =~ \.0$ ]]; then
+            echo "   - $v"
+        fi
+    done
+    
+    echo "🔹 Versiones de Desarrollo:"
+    for v in "${versiones[@]}"; do
+        if [[ ! "$v" =~ \.0$ ]]; then
+            echo "   - $v"
+        fi
+    done
+}
+
+# Función para obtener versiones LTS y de desarrollo de Lighttpd
+obtener_versiones_lighttpd() {
+    echo "Obteniendo versiones de Lighttpd..."
+    local versiones=($(curl -s https://download.lighttpd.net/lighttpd/releases-1.4.x/ | grep -oP '(?<=lighttpd-)\d+\.\d+\.\d+' | sort -V | uniq))
+    
+    echo "🔹 Versiones LTS:"
+    for v in "${versiones[@]}"; do
+        if [[ "$v" =~ \.0$ ]]; then
+            echo "   - $v"
+        fi
+    done
+    
+    echo "🔹 Versiones de Desarrollo:"
+    for v in "${versiones[@]}"; do
+        if [[ ! "$v" =~ \.0$ ]]; then
+            echo "   - $v"
+        fi
+    done
+}
+
+# Función para validar el puerto ingresado por el usuario
+validar_puerto() {
+    local puerto
+    while true; do
+        read -p "Ingrese el puerto de configuración (1-65535): " puerto
+        if [[ "$puerto" =~ ^[0-9]+$ ]] && [ "$puerto" -ge 1 ] && [ "$puerto" -le 65535 ]; then
+            echo "$puerto"
+            return
+        else
+            echo " Puerto inválido. Intente nuevamente."
+        fi
+    done
+}
+
+# Función para instalar Apache
+instalar_apache() {
+    echo "Seleccionando versión de Apache..."
+    obtener_versiones_apache
+    read -p "Ingrese la versión de Apache a instalar: " version
+    puerto=$(validar_puerto)
+    echo "Instalando Apache versión $version en el puerto $puerto..."
+    sudo apt update -y
+    sudo apt install -y apache2
+    sudo sed -i "s/Listen 80/Listen $puerto/" /etc/apache2/ports.conf
+    sudo systemctl restart apache2
+    echo "Apache instalado correctamente en el puerto $puerto."
+}
+
+# Función para instalar Nginx
+instalar_nginx() {
+    echo "Seleccionando versión de Nginx..."
+    obtener_versiones_nginx
+    read -p "Ingrese la versión de Nginx a instalar: " version
+    puerto=$(validar_puerto)
+    echo "Instalando Nginx versión $version en el puerto $puerto..."
+    sudo apt update -y
+    sudo apt install -y nginx
+    sudo sed -i "s/listen 80;/listen $puerto;/" /etc/nginx/sites-available/default
+    sudo systemctl enable nginx
+    sudo systemctl restart nginx
+    echo "Nginx instalado correctamente en el puerto $puerto."
+}
+
+# Función para instalar Lighttpd
+instalar_lighttpd() {
+    echo "Seleccionando versión de Lighttpd..."
+    obtener_versiones_lighttpd
+    read -p "Ingrese la versión de Lighttpd a instalar: " version
+    puerto=$(validar_puerto)
+    echo "Instalando Lighttpd versión $version en el puerto $puerto..."
+    sudo apt update -y
+    sudo apt install -y lighttpd
+    sudo sed -i "s/server.port\s*=\s*80/server.port = $puerto/" /etc/lighttpd/lighttpd.conf
+    sudo systemctl enable lighttpd
+    sudo systemctl start lighttpd
+    echo "✅ Lighttpd instalado correctamente en el puerto $puerto."
+}
+
+# Función para verificar el estado de los servicios
+verificar_status() {
+    echo "🔍 Estado de los servicios instalados:"
+    for servicio in apache2 nginx lighttpd; do
+        if systemctl is-active --quiet $servicio; then
+            echo "✅ $servicio está activo y corriendo."
+        else
+            echo "$servicio no está corriendo."
+        fi
+    done
+}

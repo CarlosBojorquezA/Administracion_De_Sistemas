@@ -1,0 +1,22 @@
+#!/bin/bash
+
+source ./funcionesHTTP.sh
+
+while true; do
+    echo "Seleccione una opción:"
+    echo "1) Instalar Apache"
+    echo "2) Instalar Nginx"
+    echo "3) Instalar Lighttpd"
+    echo "4) Verificar estado de los servicios"
+    echo "5) Salir"
+    read -p "Ingrese el número de opción: " opcion
+
+    case $opcion in
+        1) instalar_apache ;;
+        2) instalar_nginx ;;
+        3) instalar_lighttpd ;;
+        4) verificar_status ;;
+        5) echo "Saliendo..."; exit 0 ;;
+        *) echo " Opción no válida." ;;
+    esac
+done
