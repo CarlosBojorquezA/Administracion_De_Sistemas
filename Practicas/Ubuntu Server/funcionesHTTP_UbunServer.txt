@@ -1,18 +1,5 @@
 #!/bin/bash
 
-# Verificar si el script se ejecuta como root
-if [ "$EUID" -ne 0 ]; then
-  echo "Este script debe ejecutarse como root."
-  echo "Por favor, ejecute: sudo $0"
-  exit 1
-fi
-
-# Verificar que estamos en Ubuntu
-if ! grep -q "Ubuntu" /etc/os-release; then
-  echo "Este script está diseñado para Ubuntu."
-  exit 1
-fi
-
 # Función para validar entrada numérica
 validar_numero() {
   local input=$1
